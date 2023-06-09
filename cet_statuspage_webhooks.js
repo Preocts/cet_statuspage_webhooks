@@ -3,23 +3,25 @@
 CET to allow alerting for webhooks emitted from StatusPage IO events.  Captures
 key details from the webhook.  Auto resolve of incident is enabled by default.
 
-Author: Preocts, preocts@preocts.com
-Git   : https://github.com/Preocts/CET_statuspage.io
+Author: preocts@preocts.com
+Git   : https://github.com/Preocts/cet_statuspage_webhooks
 */
 
 // When true incidents will close when resolved
 var auto_resolve = true;
 // When true incidents will be opened/updated on incident webhooks
-var incident_watch = true;
+var open_incident = true;
 // When true incidents will be opened/updated on component webhooks
-var component_watch = false;
+var component_incidents = false;
+// When true events will be deduped
+var dedup_events = true;
 
 var webhook = PD.inputRequest.body;
 var event_type = PD.Trigger;
 var normalized_event = {};
 
-// Assemble from Incident Webhook
-if (incident_watch && ('incident' in webhook)) {
+if (open_incident && ('incident' in webhook)) {
+    // Assemble from statuspage.io Incident webhook
 
     // Handle auto-resolve
     if ((webhook.incident.status == "resolved") && auto_resolve) event_type = PD.Resolve;
@@ -27,8 +29,8 @@ if (incident_watch && ('incident' in webhook)) {
     // Build event
     normalized_event = {
         event_type: event_type,
-        incident_key: webhook.incident.id,
-        description: 'StatusPage.io Incident Webhook - ' + webhook.incident.name,
+        incident_key: dedup_events ? webhook.incident.id : Date.now(),
+        description: webhook.incident.name,
         details: {
             created_at: webhook.incident.created_at,
             status: webhook.incident.status,
@@ -40,10 +42,9 @@ if (incident_watch && ('incident' in webhook)) {
         client: "Statuspage.io",
         client_url: webhook.incident.shortlink
     };
-};
 
-// Assemble from Component Update
-if (component_watch && ('component_update' in webhook)) {
+} else if (component_incidents && ('component_update' in webhook)) {
+    // Assemble from statuspage.io Component Update webhook
 
     // Handle auto-resolve
     if ((webhook.component_update.new_status == "operational") && auto_resolve) event_type = PD.Resolve;
@@ -51,8 +52,8 @@ if (component_watch && ('component_update' in webhook)) {
     // Build event
     normalized_event = {
         event_type: event_type,
-        incident_key: webhook.component.id,
-        description: 'StatusPage.io Component Webhook - ' + webhook.component.name + ' status: ' + webhook.component.status,
+        incident_key: dedup_events ? webhook.component_update.id : Date.now(),
+        description: webhook.component.name + ' status: ' + webhook.component.status,
         details: {
             created_at: webhook.component_update.created_at,
             current_status: webhook.component_update.new_status,
@@ -61,7 +62,35 @@ if (component_watch && ('component_update' in webhook)) {
         },
         client: webhook.component.name
     };
+
+} else if (open_incident && ('status_page' in webhook)) {
+    // Assemble from PagerDuty Status Page webhook
+
+    // Handle auto-resolve
+    if ((webhook.status == "resolved") && auto_resolve) event_type = PD.Resolve;
+
+    // Build event
+    normalized_event = {
+        event_type: event_type,
+        incident_key: dedup_events ? webhook.href : Date.now(),
+        description: webhook.title,
+        details: {
+            status_page_url: webhook.href,
+            created_at: webhook.reported_at,
+            post_type: webhook.post_type,
+            message: webhook.message,
+            status: webhook.status,
+            severity: webhook.severity,
+            services: webhook.services,
+        },
+        client: webhook.status_page
+    };
 };
 
 // Emit event
-if ('event_type' in normalized_event) PD.emitGenericEvents([normalized_event]);
+if ('event_type' in normalized_event) {
+    PD.emitGenericEvents([normalized_event]);
+} else {
+    var crash = 1 / 0;
+    PD.fail("No event_type found in webhook");
+};
