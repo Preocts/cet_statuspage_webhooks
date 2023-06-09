@@ -91,6 +91,5 @@ if (open_incident && ('incident' in webhook)) {
 if ('event_type' in normalized_event) {
     PD.emitGenericEvents([normalized_event]);
 } else {
-    var crash = 1 / 0;
     PD.fail("No event_type found in webhook");
 };
